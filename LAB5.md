@@ -121,7 +121,7 @@ Pour chacun de ces deux comptes, déterminez son rôle au sein de l'organisation
 + **CloudTrail → Trails** : le trail est visible dans les 2 comptes. Regardez le nom du **bucket S3** de destination : quel AccountID contient-il ?
 + Ouvrez ce bucket depuis ce compte :
   + dossier `AWSLogs/` : de quels comptes y trouve-t-on les logs ?
-  + onglet **Permissions → Bucket policy** : qui a le droit d'y écrire ? Repérez l'**ARN du trail** dans la condition `aws:SourceArn` (`arn:aws:cloudtrail:<région>:<AccountID>:trail/…`) : depuis quel compte le trail a-t-il été créé ?
+  + onglet **Permissions → Bucket policy** : qui a le droit d'y écrire ? Repérez l'**ARN du trail** dans la condition `aws:SourceArn` (`arn:aws:cloudtrail:<région>:<AccountID>:trail/…`)
 + **GuardDuty** : depuis **Workloads**, ouvrez **Settings** : quel compte est indiqué comme **administrateur** (*Administrator account*) ? Depuis ce compte-là, que voit-on dans **Accounts** ?
 + **IAM → Roles** : le nom de certains rôles trahit leur usage (Sentinel, SSM…).
 + Posez-vous la question : si un attaquant devient administrateur du compte qui héberge les applications, **dans quel compte** faut-il avoir rangé les logs et les alertes pour qu'il ne puisse ni les lire ni les effacer ?
@@ -136,7 +136,7 @@ Pour chacun de ces deux comptes, déterminez son rôle au sein de l'organisation
 | **Logs-and-security** | 688508115372 | Sécurité | Bucket d'archive CloudTrail `labs-orgtrail-688508115372-eu-west-3`, **administrateur délégué GuardDuty**, export des findings, rôle `OIDC_MicrosoftSentinelRole` et files SQS utilisés par Sentinel |
 | **Workloads** | 455764526305 | Production | **Les ressources métier** : instances EC2, buckets `jazzpot-*`, utilisateurs IAM locaux |
 
-Le trail est **créé** dans Management, mais il **écrit** dans un bucket de Logs-and-security (`…-688508115372-…`), qui reçoit les logs de toute l'organisation (`AWSLogs/o-vbzuc4nfew/`). La bucket policy le confirme : seul le service CloudTrail, et uniquement pour le trail `arn:aws:cloudtrail:eu-west-3:701209582042:trail/labs-orgtrail` (`701209582042` = Management), a le droit d'y déposer des fichiers. De même, GuardDuty est activé dans chaque compte, mais Workloads indique Logs-and-security (`688508115372`) comme **administrateur** : c'est là que remontent les findings de tous les comptes. On sépare ainsi **ceux qui produisent les logs** de **celui qui les garde** : un administrateur de Workloads ne peut pas toucher aux preuves.
+Le trail est **créé** dans Management, mais il **écrit** dans un bucket de Logs-and-security (`…-688508115372-…`), qui reçoit les logs de toute l'organisation (`AWSLogs/o-vbzuc4nfew/`). C'est ce que montre la bucket policy : seul le service CloudTrail, et uniquement pour le trail `arn:aws:cloudtrail:eu-west-3:701209582042:trail/labs-orgtrail` (`701209582042` = Management), a le droit d'y déposer des fichiers. De même, GuardDuty est activé dans chaque compte, mais Workloads indique Logs-and-security (`688508115372`) comme **administrateur** : c'est là que remontent les findings de tous les comptes. On sépare ainsi **ceux qui produisent les logs** de **celui qui les garde**.
 
 Le compte qui porte les ressources est **Workloads**. C'est donc la cible la plus probable d'un attaquant.
 </details>
@@ -159,14 +159,12 @@ Sur le compte **Workloads** (région Paris) :
 Dans le compte **Management**, ouvrez **CloudTrail → Trails**.
 + Le trail couvre-t-il un seul compte ou toute l'organisation ? Une région ou toutes ?
 + Où sont stockés les logs ?
-+ Comment arrivent-ils dans Sentinel ?
 
 <details>
 <summary>Réponse</summary>
 
 + **labs-orgtrail** est un **organization trail**, **multi-region** : il journalise tous les comptes et toutes les régions, y compris les évènements de données S3 (lecture/écriture d'objets).
 + Les logs sont écrits dans un bucket du compte **Logs-and-security**, pas dans les comptes surveillés : un attaquant administrateur de Workloads ne peut ni les lire ni les effacer.
-+ Chaque nouveau fichier de log déclenche une notification **SQS** ; Sentinel la lit et récupère le fichier en assumant le rôle `OIDC_MicrosoftSentinelRole` (fédération OIDC, **aucune clé d'accès**). Les logs arrivent dans la table **AWSCloudTrail** de Sentinel, avec quelques minutes de délai.
 </details>
 
 Vérifiez-le dans Sentinel :
@@ -176,6 +174,8 @@ AWSCloudTrail
 | summarize Evenements = count(), Regions = make_set(AWSRegion), Dernier = max(TimeGenerated) by RecipientAccountId
 | sort by Dernier desc
 ```
+
+Vous devriez voir des logs pour les trois comptes.
 
 ### La détection : GuardDuty
 **GuardDuty** est le service de détection de menaces d'AWS : il analyse CloudTrail, les flux réseau et les requêtes DNS, et produit des alertes appelées **findings**.
